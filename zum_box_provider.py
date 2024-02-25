@@ -32,7 +32,7 @@ __revision__ = '$Format:%H$'
 
 from qgis.core import QgsProcessingProvider
 from .algorithms.import_wor import ImportWorAlgorithm
-from .algorithms.localize_layers import LocalizeLayers
+from .algorithms.zum_3tra import TriTraAlgorithm
 
 
 
@@ -56,7 +56,7 @@ class ZumBoxProvider(QgsProcessingProvider):
         Loads all algorithms belonging to this provider.
         """
         self.addAlgorithm(ImportWorAlgorithm())
-        self.addAlgorithm(LocalizeLayers())
+        self.addAlgorithm(TriTraAlgorithm())
         # add additional algorithms here
         # self.addAlgorithm(MyOtherAlgorithm())
 
