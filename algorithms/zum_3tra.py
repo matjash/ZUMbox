@@ -305,17 +305,9 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
         y = a + b * e + c * n
         x = d + e * e + f * n
 
-        Značilnosti transformacije:
-            - temelji na pravilni trikotniški mreži in virtualnih veznih točkah
-            - deformacije dolžin so manjše od 6 cm/km
-            - deformacije površin so manjše od 0,9 m2/ha
-            - točnost transformacije je višja od 10 cm za pretežni del ozemlja države
-
-            
-        Več informacij o transformaciji je na voljo na spletni strani:
+        Vir transformacijskega modela in več informacij o transformaciji:
         https://www.e-prostor.gov.si/podrocja/drzavni-koordinatni-sistem/drugo/razno/transformacija-v-novi-koordinatni-sistem/?acitem=1407-1411
-
-        """)
+         """)
         return self.tr(help_text)
 
     def createInstance(self):
