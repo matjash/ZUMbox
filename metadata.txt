@@ -20,7 +20,7 @@ repository=https://github.com/matjash/ZUMbox
 
 hasProcessingProvider=yes
 # Uncomment the following line and add your changelog:
-# changelog= 0.9 First release includes import WOR dile sources, 3tra transformation
+# changelog= 0.9 First release includes import WOR file sources, 3tra transformation
 
 # Tags are comma separated with spaces allowed
 tags=vector
