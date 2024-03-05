@@ -45,6 +45,7 @@ import processing
 from pathlib import Path
 import os
 from qgis.core import *
+import datetime 
 
 class TriTraAlgorithm(QgsProcessingAlgorithm):
     OUTPUT_FOLDER = 'OUTPUT_FOLDER'
@@ -83,6 +84,16 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
         )
 
 
+        # Add a boolean parameter to fix geometries.
+        self.addParameter(
+            QgsProcessingParameterBoolean(
+                'load_layers',  # Parameter id
+                self.tr('Naloži sloje v projekt'),  # Parameter description
+                defaultValue=True  # Default value
+            )
+        )
+
+
         self.addParameter(
             QgsProcessingParameterFile(
                 self.OUTPUT_FOLDER,
@@ -109,22 +120,26 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
             'params')
 
         if trans_type == 1:
+            trans = 'TM2GK'
             file_prm = params_path + '\\TM2GK_PRM4.csv'
             file_vvt = params_path + '\\TM2GK_VVT4.csv'
             crs = QgsCoordinateReferenceSystem('EPSG:3912') 
-        else:    
+        else:   
+            trans = 'GK2TM' 
             file_prm = params_path + '\\GK2TM_PRM4.csv'
             file_vvt =  params_path + '\\GK2TM_VVT4.csv'
             crs = QgsCoordinateReferenceSystem('EPSG:3794') 
 
 
-        def transf(triangle,e,n):
-            eTM = float(triangle['a']) + float(triangle['b']) * float(e)  + float(triangle['c']) * float(n)
+        # This function performs the coordinate transformation based on the given triangle and input coordinates
+        def transf(triangle, e, n):
+            eTM = float(triangle['a']) + float(triangle['b']) * float(e) + float(triangle['c']) * float(n)
             nTM = float(triangle['d']) + float(triangle['e']) * float(e) + float(triangle['f']) * float(n)
             trans_coor = [eTM, nTM]
             return trans_coor
-        
-        def get_triangles(file_prm, file_vvt):                
+
+        # This function reads the triangle coordinates from the given CSV files and creates QgsFeature objects
+        def get_triangles(file_prm, file_vvt):
             coordinates = {}
             fields = QgsFields()
             fields.append(QgsField('a', QVariant.Double))
@@ -138,21 +153,22 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
                 for line in file_vvt_lines:
                     data = line.strip().split()
                     coordinates[data[0]] = (data[1], data[2])
-                    
+
             with open(file_prm, 'r') as file_prm_lines:
                 triangle_container = []
-                
+
                 for cur, line in enumerate(file_prm_lines):
                     row = line.strip().split()
-                
+
                     point_f = coordinates.get(row[0], ('', ''))
                     point_s = coordinates.get(row[1], ('', ''))
                     point_t = coordinates.get(row[2], ('', ''))
-                    str(point_t[0]), str(point_t[1])
-     
+
                     fet = QgsFeature()
-                    #geometry = QgsGeometry.fromPolygonXY([[QgsPointXY( int(point_f[0]), int(point_f[1])), QgsPointXY( int(point_s[0]), int(point_s[1])), QgsPointXY( int(point_t[0]), int(point_t[1])), QgsPointXY( int(point_f[0]), int(point_f[1]))]])
-                    geometry = QgsGeometry.fromPolygonXY([[QgsPointXY( float(point_f[0]), float(point_f[1])), QgsPointXY( float(point_s[0]), float(point_s[1])), QgsPointXY( float(point_t[0]), float(point_t[1])), QgsPointXY( float(point_f[0]), float(point_f[1]))]])
+                    geometry = QgsGeometry.fromPolygonXY([[QgsPointXY(float(point_f[0]), float(point_f[1])),
+                                                           QgsPointXY(float(point_s[0]), float(point_s[1])),
+                                                           QgsPointXY(float(point_t[0]), float(point_t[1])),
+                                                           QgsPointXY(float(point_f[0]), float(point_f[1]))]])
                     fet.setFields(fields)
                     fet.setGeometry(geometry)
                     fet.setAttribute('a', row[3])
@@ -181,11 +197,17 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
                             if triangle_geom.intersects(point_geometry): 
                                 trans_coord = transf(fid, vertex.x(), vertex.y())
                                 input_layer.moveVertexV2(QgsPoint(trans_coord[0], trans_coord[1]), poly_feature.id(), cur)
-
+   
         for input_layer in input_layers:
-            feedback.pushInfo(self.tr('Pretvarjam sloj: ') + input_layer.name())
-            layer_source = Path(input_layer.source())
-            source_folder = layer_source.parents[0]
+            feedback.pushDebugInfo(self.tr('Pretvarjam sloj: ') + input_layer.name())
+            feedback.pushDebugInfo(self.tr('Vir sloja: ') + str(input_layer.source()))
+            old_metadata = input_layer.metadata()
+
+
+            layer_source_list = input_layer.source().split('|')              
+            layer_source = Path(layer_source_list[0])
+
+            source_folder = layer_source.parents[0]     
             extension = layer_source.suffix
           
             if trans_type == 0:
@@ -198,11 +220,24 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
             else:
                 out_folder = source_folder
 
-            output_layer = out_folder/(file_name + str(extension))
+            feedback.pushDebugInfo(str(len(layer_source_list)))
+            if len(layer_source_list) >= 2:
+                if layer_source_list[1][:9] == 'layername':
+                    out_layer_name = layer_source_list[1].split('=')[1]
+                    if trans_type == 0:
+                        out_layer_name = out_layer_name + '_96TM'
+                    else:
+                        out_layer_name = out_layer_name + '_48GK'
+            else:
+                out_layer_name = file_name
 
+
+
+            output_layer = out_folder/(out_layer_name + str(extension))
             counter = 1
+
             while output_layer.exists():
-                f_name = file_name + '_' + str(counter)
+                f_name = out_layer_name + '_' + str(counter)
                 output_layer = out_folder/(f_name + str(extension))
                 counter += 1
                 file_name = f_name
@@ -230,28 +265,53 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
             temp_layer.commitChanges()
             temp_layer.setCrs(crs)
           
-                              
+            def update_history_metadata(layer, old_metadata):
+                layer.startEditing()
+                
+                now = datetime.datetime.now()
+                processing_step = self.tr(f'q3tra transformacija {trans}.')
+    
+                new_history = f'{now}:{processing_step}' 
+                old_metadata.addHistoryItem(new_history)
+                layer.setMetadata(old_metadata)
+
+                layer.commitChanges()
+ 
+
             def write_layer_to_file():
                 transform_context = QgsProject.instance().transformContext()
                 options = QgsVectorFileWriter.SaveVectorOptions()
                 options.driverName = input_layer.dataProvider().storageType()
                 options.fileEncoding = input_layer.dataProvider().encoding()
+                options.layerMetadata = temp_layer.metadata()
                 options.saveMetadata = True
                 options.crs = crs
                 QgsVectorFileWriter.writeAsVectorFormatV3(temp_layer, str(output_layer), transform_context, options)
                 
 
             try:
+                update_history_metadata(temp_layer, old_metadata)
+
                 write_layer_to_file()
-                feedback.pushInfo(self.tr('Sloj uspešno pretvorjen.'))
+                if self.parameterAsBool(parameters, 'load_layers', context):
+                    layer = QgsVectorLayer(str(output_layer), out_layer_name, 'ogr')
+                    QgsProject.instance().addMapLayer(layer)
+                feedback.pushInfo(self.tr(f'Sloj uspešno pretvorjen in shranjen: {output_layer}.'))
             except Exception as e:
                 feedback.reportError(self.tr('Napaka pri zapisu sloja: ') + str(e))
                 return {}
            
         #open output folder
         if output_folder:
+            feedback.pushInfo(self.tr('Pretvorba končana, sloji so shranjeni v: ') + str(output_folder))
             os.startfile(output_folder)
-        feedback.pushInfo(self.tr('Pretvorba končana, sloji so shranjeni v: ') + str(output_folder))
+        else:    
+            feedback.pushInfo(self.tr('Pretvorba končana, sloji so shranjeni v mapah z orignalnimi sloji:'))
+            for layer in input_layers:
+                feedback.pushInfo(str(layer.source()))
+     
+
+        
         return {}
 
     def name(self):
@@ -262,7 +322,7 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
         lowercase alphanumeric characters only and no spaces or other
         formatting characters.
         """
-        return 'q3Tra'
+        return 'q3tra'
 
     def displayName(self):
         """
@@ -294,10 +354,10 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
     def shortHelpString(self):
         help_text = self.tr("""Orodje za transformacijo koordinat is D48/GK v D96/TM in obratno. 
         Reultat transformacije je nov sloj s pripono _96TM ali _48GK, odvisno od smeri transformacije. Če ne izberete ciljne mape, se sloji shranijo v mapo izvorne datoteke.
-        Z opcijo "Popravi geometrije sloja", pred transformacijo požene orodje za popravo geometrij (Fix geometries).
+        Z opcijo "Popravi geometrije sloja", pred transformacijo požene orodje za popravo geometrij (Fix geometries). Metapodatki sloja se ohranijo.
         
                         
-        Algritem uporablja vsedržavni model trikotniške transformacije, različico transformacijskega modela 4.0 (29.5.2017). 
+        Algoritem uporablja vsedržavni model trikotniške transformacije, različico transformacijskega modela 4.0 (29.5.2017). 
         Za vsako točko oz. lom vhodnega sloja se poišče trikotnik, v katerem se nahaja in s parametri za ta trikotnik izračuna nove koordinate po formuli:
         e = a + b * y + c * x
         n = d + e * y + f * x

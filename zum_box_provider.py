@@ -57,8 +57,6 @@ class ZumBoxProvider(QgsProcessingProvider):
         """
         self.addAlgorithm(ImportWorAlgorithm())
         self.addAlgorithm(TriTraAlgorithm())
-        # add additional algorithms here
-        # self.addAlgorithm(MyOtherAlgorithm())
 
     def id(self):
         """
