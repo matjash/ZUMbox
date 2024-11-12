@@ -34,8 +34,10 @@ from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (QgsProcessingParameterFile,
                        QgsProcessingAlgorithm,
                        QgsProject,
-                       QgsVectorLayer,
+                       QgsVectorLayer, 
+                       QgsLayerTreeGroup,        
                        QgsRasterLayer)
+
 import os
 import chardet
 
@@ -68,7 +70,8 @@ class ImportWorAlgorithm(QgsProcessingAlgorithm):
             total_tables = 0
             successful_loads = 0
             unsuccessful_loads_info = []  # List to store information about unsuccessful loads
-
+            #remove leading/trailing spaces
+            input_wor_content = input_wor_content.strip()
             for line in input_wor_content.splitlines():
                 # Check if the algorithm was cancelled by the user
                 if feedback.isCanceled():
@@ -128,7 +131,8 @@ class ImportWorAlgorithm(QgsProcessingAlgorithm):
             try:
                 # Open the file in binary mode and get a sample of the content
                 with open(tab_file_path, 'rb') as file:
-                    rawdata = file.read(10000)  # You may need to adjust the number of bytes read depending on your files
+                    byte_lenght = os.path.getsize(tab_file_path)
+                    rawdata = file.read(byte_lenght)  # You may need to adjust the number of bytes read depending on your files
                 # Detect the encoding
                 result = chardet.detect(rawdata)
                 encoding = result['encoding']
@@ -154,7 +158,8 @@ class ImportWorAlgorithm(QgsProcessingAlgorithm):
             try:
                 # Open the file in binary mode and get a sample of the content
                 with open(wor_file_path, 'rb') as file:
-                    rawdata = file.read(10000)  # You may need to adjust the number of bytes read depending on your files
+                    byte_lenght = os.path.getsize(wor_file_path)
+                    rawdata = file.read(byte_lenght) 
                 # Detect the encoding
                 result = chardet.detect(rawdata)
                 feedback.pushInfo(self.tr(str(result)))
@@ -178,13 +183,14 @@ class ImportWorAlgorithm(QgsProcessingAlgorithm):
         input_wor_content = read_wor_file(wor_file_path)
 
         # Load .tab files into QGIS
+  
         qgis_project = QgsProject.instance()
         root = qgis_project.layerTreeRoot()
         group_name = os.path.splitext(os.path.basename(wor_file_path))[0]
-        group = root.addGroup(group_name)
+        group = root.insertGroup(0, group_name)
 
         load_tab_files_into_qgis(input_wor_content, wor_file_path,  qgis_project, group)
-
+        
         return {}   
 
 
