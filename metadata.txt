@@ -6,7 +6,7 @@
 name=ZUMbox
 qgisMinimumVersion=3.20
 description=Urban planning related tools
-version=1.0
+version=1.1
 author=Matjaž Mori, ZUM d.o.o.
 email=matjaz.mori@gmail.com
 
@@ -20,7 +20,8 @@ repository=https://github.com/matjash/ZUMbox
 
 hasProcessingProvider=yes
 # Uncomment the following line and add your changelog:
-# changelog= 1.0 First release includes import WOR file sources, 3tra transformation
+# changelog= 1.1 Bugfix in import_wor.py, improved 3tra performance
+             1.0 First release includes import WOR file sources, 3tra transformation
 
 # Tags are comma separated with spaces allowed
 tags=vector, mapinfo, WOR, reproject, 3tra
