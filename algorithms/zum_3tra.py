@@ -46,7 +46,8 @@ from pathlib import Path
 import os
 from qgis.core import *
 import datetime 
-
+from qgis.core import QgsSpatialIndex, QgsFeature, QgsGeometry, QgsPointXY
+from concurrent.futures import ThreadPoolExecutor
 class TriTraAlgorithm(QgsProcessingAlgorithm):
     OUTPUT_FOLDER = 'OUTPUT_FOLDER'
     INPUT = 'INPUT'
@@ -89,7 +90,7 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterBoolean(
                 'load_layers',  # Parameter id
                 self.tr('Naloži sloje v projekt'),  # Parameter description
-                defaultValue=True  # Default value
+                defaultValue=False # Default value
             )
         )
 
@@ -181,23 +182,51 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
             return triangle_container
                   
 
+
         def transform_poygons(input_layer, triangles):
-            #tri_index = QgsSpatialIndex(triangles, flags=QgsSpatialIndex.FlagStoreFeatureGeometries)
+            # Build a spatial index on the triangles
+
             tri_index = triangles    
-            for current, poly_feature in enumerate(input_layer.getFeatures()):
-                feedback.setProgress(int(current * total))
-                for fid in tri_index:
-                    triangle_geom = fid.geometry()
-                    if poly_feature.geometry().intersects(triangle_geom): 
-                        vertices = poly_feature.geometry().vertices()
-                        for cur, vertex in enumerate(vertices):  
-                            if feedback.isCanceled():
-                                return {}
-                            point_geometry = QgsGeometry.fromPointXY(QgsPointXY(vertex.x(),vertex.y()))
-                            if triangle_geom.intersects(point_geometry): 
-                                trans_coord = transf(fid, vertex.x(), vertex.y())
-                                input_layer.moveVertexV2(QgsPoint(trans_coord[0], trans_coord[1]), poly_feature.id(), cur)
-   
+
+
+            def process_feature(poly_feature):
+                poly_geom = poly_feature.geometry()
+                candidates = tri_index.intersects(poly_geom.boundingBox())  # Faster spatial filtering
+                modified = False
+
+                for fid in candidates:
+                    triangle_geom = triangles[fid].geometry()
+                    if poly_geom.intersects(triangle_geom):
+                        vertices = poly_geom.vertices()
+                        new_vertices = []
+
+                        for vertex in vertices:
+                            point_geometry = QgsGeometry.fromPointXY(QgsPointXY(vertex.x(), vertex.y()))
+                            if triangle_geom.intersects(point_geometry):
+                                trans_coord = transf(triangles[fid], vertex.x(), vertex.y())
+                                new_vertices.append(QgsPoint(trans_coord[0], trans_coord[1]))
+                            else:
+                                new_vertices.append(vertex)
+
+                        # Update geometry only if changes are made
+                        if new_vertices:
+                            new_geom = QgsGeometry.fromPolygonXY([new_vertices])
+                            poly_feature.setGeometry(new_geom)
+                            modified = True
+
+                if modified:
+                    input_layer.updateFeature(poly_feature)  # Batch update
+            
+            total = input_layer.featureCount()
+            with ThreadPoolExecutor() as executor:
+                for current, poly_feature in enumerate(input_layer.getFeatures()):
+                    feedback.setProgress(int((current / total) * 100))
+                    if feedback.isCanceled():
+                        return
+                    executor.submit(process_feature, poly_feature)
+
+            
+
         for input_layer in input_layers:
             feedback.pushDebugInfo(self.tr('Pretvarjam sloj: ') + input_layer.name())
             feedback.pushDebugInfo(self.tr('Vir sloja: ') + str(input_layer.source()))
@@ -217,12 +246,14 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
             
             if output_folder:
                 out_folder = Path(output_folder)
+   
             else:
                 out_folder = source_folder
 
             feedback.pushDebugInfo(str(len(layer_source_list)))
             if len(layer_source_list) >= 2:
                 if layer_source_list[1][:9] == 'layername':
+                    
                     out_layer_name = layer_source_list[1].split('=')[1]
                     if trans_type == 0:
                         out_layer_name = out_layer_name + '_96TM'
