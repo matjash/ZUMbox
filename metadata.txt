@@ -6,12 +6,19 @@
 name=ZUMbox
 qgisMinimumVersion=3.20
 qgisMaximumVersion=4.99
-description=Urban planning related tools
+description=Import MapInfo .WOR workspaces and D48/GK ↔ D96/TM triangle transformation / Uvoz MapInfo .WOR in trikotniška transformacija D48/GK ↔ D96/TM
 version=1.2
 author=Matjaž Mori, ZUM d.o.o.
 email=matjaz.mori@gmail.com
 
-about=Zbirka orodij razvitih za potrebe ZUM d.o.o. 
+about=EN: Processing tools by ZUM d.o.o. for urban planning in Slovenia.
+    - Import .WOR: loads all TAB layers from a MapInfo workspace into a new layer group, with automatic encoding detection.
+    - 3tra: transforms vector layers between D48/GK and D96/TM using the official GURS triangle transformation model (v4.0).
+    Tools are in the Processing Toolbox under ZUMbox; interface in Slovenian.
+    SL: Orodja za procesiranje, razvita v ZUM d.o.o. za potrebe prostorskega načrtovanja.
+    - Uvoz .WOR: naloži vse TAB sloje iz MapInfo delovnega prostora v novo skupino slojev, s samodejnim prepoznavanjem kodiranja.
+    - 3tra: transformacija vektorskih slojev med D48/GK in D96/TM z vsedržavnim modelom trikotniške transformacije GURS (v4.0).
+    Orodja so v orodjarni za procesiranje pod ZUMbox.
 
 tracker=https://github.com/matjash/ZUMbox/issues
 repository=https://github.com/matjash/ZUMbox
