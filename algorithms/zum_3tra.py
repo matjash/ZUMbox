@@ -30,27 +30,33 @@ __copyright__ = '(C) 2023 by Matjaž Mori'
 
 __revision__ = '$Format:%H$'
 
-from qgis.PyQt.QtCore import QCoreApplication
-from qgis.core import (QgsProcessing,
-                       QgsProcessingAlgorithm,
-                       QgsProcessingParameterFile,
-                        QgsProcessingParameterMultipleLayers,
-                        QgsProcessingParameterEnum,
-                        QgsProcessingParameterBoolean,
-                        QgsPoint,
-                        QgsFeature, 
-                        QgsFields)
-from qgis.PyQt.QtCore import *
-import processing
-from pathlib import Path
+import datetime
 import os
-from qgis.core import *
-import datetime 
-from qgis.core import QgsSpatialIndex, QgsFeature, QgsGeometry, QgsPointXY
-from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
+import processing
+from qgis.PyQt.QtCore import QCoreApplication, QUrl
+from qgis.PyQt.QtGui import QDesktopServices
+from qgis.core import (Qgis,
+                       QgsCoordinateReferenceSystem,
+                       QgsFeature,
+                       QgsField,
+                       QgsFields,
+                       QgsGeometry,
+                       QgsPoint,
+                       QgsPointXY,
+                       QgsProcessing,
+                       QgsProcessingAlgorithm,
+                       QgsProcessingParameterBoolean,
+                       QgsProcessingParameterEnum,
+                       QgsProcessingParameterFile,
+                       QgsProcessingParameterMultipleLayers,
+                       QgsProject,
+                       QgsSpatialIndex,
+                       QgsVectorFileWriter,
+                       QgsVectorLayer)
 
-from qgis.core import Qgis
+# Field type: QMetaType in QGIS >= 3.38 (required in QGIS 4 / Qt6), QVariant before
 if Qgis.QGIS_VERSION_INT >= 33800:
     from qgis.PyQt.QtCore import QMetaType
     DOUBLE = QMetaType.Type.Double
@@ -58,6 +64,13 @@ else:
     from qgis.PyQt.QtCore import QVariant
     DOUBLE = QVariant.Double
 
+# Scoped enums (QGIS >= 3.36, QGIS 4) with fallback for older QGIS 3
+try:
+    FOLDER = Qgis.ProcessingFileParameterBehavior.Folder
+    ANY_VECTOR = Qgis.ProcessingSourceType.VectorAnyGeometry
+except AttributeError:
+    FOLDER = QgsProcessingParameterFile.Folder
+    ANY_VECTOR = QgsProcessing.TypeVectorAnyGeometry
 
 
 class TriTraAlgorithm(QgsProcessingAlgorithm):
@@ -73,7 +86,7 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
             self.INPUT,
             self.tr('Sloji za transformacijo'),
             optional=True,
-            layerType=QgsProcessing.TypeVectorAnyGeometry
+            layerType=ANY_VECTOR
             )
         )
 
@@ -112,7 +125,7 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
                 self.OUTPUT_FOLDER,
                 self.tr('Ciljna mapa'),
                 optional=True,
-                behavior=QgsProcessingParameterFile.Folder,
+                behavior=FOLDER,
                 fileFilter='All files (*.*)'
             )
         )
@@ -134,13 +147,13 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
 
         if trans_type == 1:
             trans = 'TM2GK'
-            file_prm = params_path + '\\TM2GK_PRM4.csv'
-            file_vvt = params_path + '\\TM2GK_VVT4.csv'
+            file_prm = os.path.join(params_path, 'TM2GK_PRM4.csv')
+            file_vvt = os.path.join(params_path, 'TM2GK_VVT4.csv')
             crs = QgsCoordinateReferenceSystem('EPSG:3912') 
         else:   
             trans = 'GK2TM' 
-            file_prm = params_path + '\\GK2TM_PRM4.csv'
-            file_vvt =  params_path + '\\GK2TM_VVT4.csv'
+            file_prm = os.path.join(params_path, 'GK2TM_PRM4.csv')
+            file_vvt =  os.path.join(params_path, 'GK2TM_VVT4.csv')
             crs = QgsCoordinateReferenceSystem('EPSG:3794') 
 
 
@@ -195,49 +208,32 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
                   
 
 
+        # Transforms every vertex of every feature (points, lines, polygons,
+        # multipart, holes) with the parameters of the triangle it lies in.
         def transform_poygons(input_layer, triangles):
-            # Build a spatial index on the triangles
+            # Spatial index over the triangles (feature id = position in list)
+            tri_index = QgsSpatialIndex()
+            for i, tri in enumerate(triangles):
+                tri.setId(i)
+                tri_index.addFeature(tri)
 
-            tri_index = triangles    
+            total = input_layer.featureCount() or 1
+            for current, feature in enumerate(input_layer.getFeatures()):
+                if feedback.isCanceled():
+                    return
+                feedback.setProgress(int(current * 100 / total))
 
+                geom = feature.geometry()
+                candidates = [triangles[i] for i in tri_index.intersects(geom.boundingBox())]
 
-            def process_feature(poly_feature):
-                poly_geom = poly_feature.geometry()
-                candidates = tri_index.intersects(poly_geom.boundingBox())  # Faster spatial filtering
-                modified = False
-
-                for fid in candidates:
-                    triangle_geom = triangles[fid].geometry()
-                    if poly_geom.intersects(triangle_geom):
-                        vertices = poly_geom.vertices()
-                        new_vertices = []
-
-                        for vertex in vertices:
-                            point_geometry = QgsGeometry.fromPointXY(QgsPointXY(vertex.x(), vertex.y()))
-                            if triangle_geom.intersects(point_geometry):
-                                trans_coord = transf(triangles[fid], vertex.x(), vertex.y())
-                                new_vertices.append(QgsPoint(trans_coord[0], trans_coord[1]))
-                            else:
-                                new_vertices.append(vertex)
-
-                        # Update geometry only if changes are made
-                        if new_vertices:
-                            new_geom = QgsGeometry.fromPolygonXY([new_vertices])
-                            poly_feature.setGeometry(new_geom)
-                            modified = True
-
-                if modified:
-                    input_layer.updateFeature(poly_feature)  # Batch update
-            
-            total = input_layer.featureCount()
-            with ThreadPoolExecutor() as executor:
-                for current, poly_feature in enumerate(input_layer.getFeatures()):
-                    feedback.setProgress(int((current / total) * 100))
-                    if feedback.isCanceled():
-                        return
-                    executor.submit(process_feature, poly_feature)
-
-            
+                for idx, vertex in enumerate(geom.vertices()):
+                    point = QgsGeometry.fromPointXY(QgsPointXY(vertex.x(), vertex.y()))
+                    for tri in candidates:
+                        if tri.geometry().intersects(point):
+                            e, n = transf(tri, vertex.x(), vertex.y())
+                            input_layer.moveVertexV2(
+                                QgsPoint(e, n, vertex.z(), vertex.m()), feature.id(), idx)
+                            break   # each vertex is transformed exactly once
 
         for input_layer in input_layers:
             feedback.pushDebugInfo(self.tr('Pretvarjam sloj: ') + input_layer.name())
@@ -299,9 +295,6 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
                 },context=context)['OUTPUT']
                 input_layer.removeSelection()
 
-            total = 100.0 / input_layer.featureCount() if input_layer.featureCount()>0 else 0
-      
-
             temp_layer.startEditing()     
             triangles = get_triangles(file_prm, file_vvt)
             transform_poygons(temp_layer, triangles)
@@ -347,7 +340,8 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
         #open output folder
         if output_folder:
             feedback.pushInfo(self.tr('Pretvorba končana, sloji so shranjeni v: ') + str(output_folder))
-            os.startfile(output_folder)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_folder)))
+
         else:    
             feedback.pushInfo(self.tr('Pretvorba končana, sloji so shranjeni v mapah z orignalnimi sloji:'))
             for layer in input_layers:
