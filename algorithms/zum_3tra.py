@@ -48,6 +48,18 @@ from qgis.core import *
 import datetime 
 from qgis.core import QgsSpatialIndex, QgsFeature, QgsGeometry, QgsPointXY
 from concurrent.futures import ThreadPoolExecutor
+
+
+from qgis.core import Qgis
+if Qgis.QGIS_VERSION_INT >= 33800:
+    from qgis.PyQt.QtCore import QMetaType
+    DOUBLE = QMetaType.Type.Double
+else:
+    from qgis.PyQt.QtCore import QVariant
+    DOUBLE = QVariant.Double
+
+
+
 class TriTraAlgorithm(QgsProcessingAlgorithm):
     OUTPUT_FOLDER = 'OUTPUT_FOLDER'
     INPUT = 'INPUT'
@@ -143,12 +155,12 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
         def get_triangles(file_prm, file_vvt):
             coordinates = {}
             fields = QgsFields()
-            fields.append(QgsField('a', QVariant.Double))
-            fields.append(QgsField('b', QVariant.Double))
-            fields.append(QgsField('c', QVariant.Double))
-            fields.append(QgsField('d', QVariant.Double))
-            fields.append(QgsField('e', QVariant.Double))
-            fields.append(QgsField('f', QVariant.Double))
+            fields.append(QgsField('a', DOUBLE))
+            fields.append(QgsField('b', DOUBLE))
+            fields.append(QgsField('c', DOUBLE))
+            fields.append(QgsField('d', DOUBLE))
+            fields.append(QgsField('e', DOUBLE))
+            fields.append(QgsField('f', DOUBLE))
 
             with open(file_vvt, 'r') as file_vvt_lines:
                 for line in file_vvt_lines:

@@ -5,6 +5,7 @@
 [general]
 name=ZUMbox
 qgisMinimumVersion=3.20
+qgisMaximumVersion=4.99
 description=Urban planning related tools
 version=1.2
 author=Matjaž Mori, ZUM d.o.o.
@@ -20,7 +21,7 @@ repository=https://github.com/matjash/ZUMbox
 
 hasProcessingProvider=yes
 # Uncomment the following line and add your changelog:
-changelog= 1.2 Import WOR: no longer requires chardet, better encoding detection with selectable fallback encoding, ignores trailing empty lines
+changelog= 1.2 Import WOR: no longer requires chardet, better encoding detection with selectable fallback encoding, ignores trailing empty lines, QGIS 4 compatibility
              1.1 Bugfix in import_wor.py, improved 3tra performance
              1.0 First release includes import WOR file sources, 3tra transformation
 
