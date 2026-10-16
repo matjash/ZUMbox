@@ -36,7 +36,6 @@ from qgis.core import (QgsProcessingParameterFile,
                        QgsProcessingAlgorithm,
                        QgsProject,
                        QgsVectorLayer, 
-                       QgsLayerTreeGroup,        
                        QgsRasterLayer)
 
 import os
@@ -140,7 +139,7 @@ class ImportWorAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterFile(
                 'wor_file', 
                 self.tr('.WOR datoteka'), 
-                behavior=QgsProcessingParameterFile.File, 
+                behavior=QgsProcessingParameterFile.Behavior.File, 
                 fileFilter='WOR datoteke (*.WOR *.wor)', 
                 defaultValue=None
             )

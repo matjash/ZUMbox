@@ -64,15 +64,6 @@ else:
     from qgis.PyQt.QtCore import QVariant
     DOUBLE = QVariant.Double
 
-# Scoped enums (QGIS >= 3.36, QGIS 4) with fallback for older QGIS 3
-try:
-    FOLDER = Qgis.ProcessingFileParameterBehavior.Folder
-    ANY_VECTOR = Qgis.ProcessingSourceType.VectorAnyGeometry
-except AttributeError:
-    FOLDER = QgsProcessingParameterFile.Folder
-    ANY_VECTOR = QgsProcessing.TypeVectorAnyGeometry
-
-
 class TriTraAlgorithm(QgsProcessingAlgorithm):
     OUTPUT_FOLDER = 'OUTPUT_FOLDER'
     INPUT = 'INPUT'
@@ -86,7 +77,7 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
             self.INPUT,
             self.tr('Sloji za transformacijo'),
             optional=True,
-            layerType=ANY_VECTOR
+            layerType=QgsProcessing.SourceType.TypeVectorAnyGeometry
             )
         )
 
@@ -125,7 +116,7 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
                 self.OUTPUT_FOLDER,
                 self.tr('Ciljna mapa'),
                 optional=True,
-                behavior=FOLDER,
+                behavior=QgsProcessingParameterFile.Behavior.Folder,
                 fileFilter='All files (*.*)'
             )
         )
@@ -177,8 +168,10 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
 
             with open(file_vvt, 'r') as file_vvt_lines:
                 for line in file_vvt_lines:
+                    # columns: id, target e, target n, source e, source n
+                    # triangles must be built from the SOURCE coordinates
                     data = line.strip().split()
-                    coordinates[data[0]] = (data[1], data[2])
+                    coordinates[data[0]] = (data[3], data[4])
 
             with open(file_prm, 'r') as file_prm_lines:
                 triangle_container = []
@@ -258,19 +251,15 @@ class TriTraAlgorithm(QgsProcessingAlgorithm):
             else:
                 out_folder = source_folder
 
-            feedback.pushDebugInfo(str(len(layer_source_list)))
-            if len(layer_source_list) >= 2:
-                if layer_source_list[1][:9] == 'layername':
-                    
-                    out_layer_name = layer_source_list[1].split('=')[1]
-                    if trans_type == 0:
-                        out_layer_name = out_layer_name + '_96TM'
-                    else:
-                        out_layer_name = out_layer_name + '_48GK'
-            else:
-                out_layer_name = file_name
-
-
+            # Output name: file name, or the layer name inside a multi-layer
+            # file (e.g. GeoPackage "|layername=..."). Other "|" options such as
+            # "|geometrytype=..." are ignored.
+            out_layer_name = file_name
+            for option in layer_source_list[1:]:
+                if option.startswith('layername='):
+                    suffix = '_96TM' if trans_type == 0 else '_48GK'
+                    out_layer_name = option.split('=', 1)[1] + suffix
+                    break
 
             output_layer = out_folder/(out_layer_name + str(extension))
             counter = 1
