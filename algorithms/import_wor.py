@@ -32,6 +32,7 @@ __revision__ = '$Format:%H$'
 
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (QgsProcessingParameterFile,
+                       QgsProcessingParameterEnum,
                        QgsProcessingAlgorithm,
                        QgsProject,
                        QgsVectorLayer, 
@@ -39,13 +40,99 @@ from qgis.core import (QgsProcessingParameterFile,
                        QgsRasterLayer)
 
 import os
-import chardet
+import unicodedata
+
+
+# Fallback encodings offered in the dialog: (label, python codec).
+# Index 0 means "suggest from the WOR content".
+FALLBACK_ENCODINGS = [
+    ('Samodejno (predlog iz vsebine WOR)', None),
+    ('Windows-1250 (srednjeevropsko)', 'cp1250'),
+    ('ISO-8859-2 (Latin-2)', 'iso8859_2'),
+    ('Windows-1252 (zahodnoevropsko)', 'cp1252'),
+    ('Windows-1251 (cirilica)', 'cp1251'),
+    ('UTF-8', 'utf-8'),
+]
+
+# MapInfo "!Charset" names -> python codecs
+MAPINFO_CHARSETS = {
+    'windowslatin2': 'cp1250',
+    'iso8859_2': 'iso8859_2',
+    'windowslatin1': 'cp1252',
+    'iso8859_1': 'latin_1',
+    'windowscyrillic': 'cp1251',
+    'utf-8': 'utf-8',
+    'utf8': 'utf-8',
+}
+
+SLOVENIAN_CHARS = set('čšžćđČŠŽĆĐ')
+
+
+def encoding_from_file(rawdata):
+    """Return (codec, reason) if the file itself tells us its encoding, else (None, None)."""
+    # Byte order marks
+    if rawdata.startswith(b'\xef\xbb\xbf'):
+        return 'utf-8-sig', 'UTF-8 BOM'
+    if rawdata.startswith((b'\xff\xfe', b'\xfe\xff')):
+        return 'utf-16', 'UTF-16 BOM'
+    head = rawdata[:4000]
+    # UTF-16 without BOM: lots of null bytes
+    if head and head.count(b'\x00') > len(head) // 4:
+        if head[1:2] == b'\x00':
+            return 'utf-16-le', 'UTF-16 LE (brez BOM)'
+        return 'utf-16-be', 'UTF-16 BE (brez BOM)'
+    # MapInfo's own declaration, e.g. !charset WindowsLatin2
+    for line in head.splitlines()[:20]:
+        text = line.decode('ascii', 'ignore').strip().lower()
+        if text.startswith('!charset'):
+            for key, codec in MAPINFO_CHARSETS.items():
+                if key in text:
+                    return codec, '!Charset v datoteki'
+    # Clean UTF-8 (non-ASCII content that decodes as UTF-8)
+    try:
+        rawdata.decode('utf-8')
+        if any(b > 127 for b in rawdata):
+            return 'utf-8', 'veljaven UTF-8'
+    except UnicodeDecodeError:
+        pass
+    return None, None
+
+
+def suggest_encoding(rawdata):
+    """Guess the most plausible 8-bit encoding by scoring the decoded text."""
+    best, best_score = 'cp1250', None
+    for _label, codec in FALLBACK_ENCODINGS[1:]:
+        if codec == 'utf-8':
+            continue
+        try:
+            text = rawdata.decode(codec)
+        except UnicodeDecodeError:
+            continue
+        score = 0
+        for ch in text:
+            if ord(ch) < 128:
+                continue
+            if ch in SLOVENIAN_CHARS:
+                score += 3
+            elif unicodedata.category(ch).startswith('L'):
+                score += 1
+            elif unicodedata.category(ch).startswith('C'):
+                score -= 3      # control characters = wrong guess
+        if best_score is None or score > best_score:
+            best, best_score = codec, score
+    return best
+
+
+def clean_wor_text(text):
+    """Remove trailing empty lines / whitespace and DOS EOF marks (in memory only)."""
+    return text.rstrip(' \t\r\n\x00\x1a')
 
 class ImportWorAlgorithm(QgsProcessingAlgorithm):
     # Constants used to refer to parameters and outputs. They will be
     # used when calling the algorithm from another algorithm, or when
     # calling from the QGIS console.
     INPUT = 'wor_file'
+    ENCODING = 'fallback_encoding'
 
     def initAlgorithm(self, config):
 
@@ -56,6 +143,15 @@ class ImportWorAlgorithm(QgsProcessingAlgorithm):
                 behavior=QgsProcessingParameterFile.File, 
                 fileFilter='WOR datoteke (*.WOR *.wor)', 
                 defaultValue=None
+            )
+        )
+
+        self.addParameter(
+            QgsProcessingParameterEnum(
+                self.ENCODING,
+                self.tr('Kodiranje, če ni določeno v datoteki'),
+                options=[label for label, _codec in FALLBACK_ENCODINGS],
+                defaultValue=0
             )
         )
 
@@ -129,58 +225,58 @@ class ImportWorAlgorithm(QgsProcessingAlgorithm):
         def read_tab_file(tab_file_path):
             directory = os.path.dirname(tab_file_path)
             try:
-                # Open the file in binary mode and get a sample of the content
                 with open(tab_file_path, 'rb') as file:
-                    byte_lenght = os.path.getsize(tab_file_path)
-                    rawdata = file.read(byte_lenght)  # You may need to adjust the number of bytes read depending on your files
-                # Detect the encoding
-                result = chardet.detect(rawdata)
-                encoding = result['encoding']
-                # Open the file again in text mode with the detected encoding
-                with open(tab_file_path, 'r', encoding=encoding) as file:
-                    tab_content = file.read()
-                    for line in tab_content.splitlines():
-                        if line.strip().startswith('File'):
-                            filename = line.split('"')[1].strip()
-                            raster_file_path = os.path.join(directory, filename)
-                            return raster_file_path
-      
-            except IOError as e:
+                    rawdata = file.read()
+                encoding, _reason = encoding_from_file(rawdata)
+                if encoding is None:
+                    encoding = fallback_codec
+                tab_content = rawdata.decode(encoding, errors='replace')
+                for line in tab_content.splitlines():
+                    if line.strip().startswith('File'):
+                        filename = line.split('"')[1].strip()
+                        return os.path.join(directory, filename)
+            except (IOError, IndexError) as e:
                 feedback.reportError(self.tr(f"Napaka pri branju .TAB datoteke: {e}"))
-                return None
-            except UnicodeDecodeError as e:
-                feedback.reportError(self.tr(f"Napaka pri nastavitvi kodiranja ob branju .TAB datoteke: {e}"))
-                return None
+            return None
 
 
-        # Function to read .wor file      
+        # Function to read .wor file (the original file is never modified)
         def read_wor_file(wor_file_path):
             try:
-                # Open the file in binary mode and get a sample of the content
                 with open(wor_file_path, 'rb') as file:
-                    byte_lenght = os.path.getsize(wor_file_path)
-                    rawdata = file.read(byte_lenght) 
-                # Detect the encoding
-                result = chardet.detect(rawdata)
-                feedback.pushInfo(self.tr(str(result)))
-                encoding = result['encoding']
-                # Open the file again in text mode with the detected encoding
-                with open(wor_file_path, 'r', encoding=encoding) as file:
-                    return file.read()
+                    rawdata = file.read()
             except IOError as e:
                 feedback.reportError(self.tr(f"Napaka pri branju .WOR datoteke: {e}"))
-                return None
+                return None, None
+
+            encoding, reason = encoding_from_file(rawdata)
+            if encoding is None:
+                if chosen_codec:
+                    encoding, reason = chosen_codec, 'izbrano v nastavitvah'
+                else:
+                    encoding, reason = suggest_encoding(rawdata), 'predlog iz vsebine'
+            feedback.pushInfo(self.tr(f"Kodiranje WOR: {encoding} ({reason})"))
+
+            try:
+                text = rawdata.decode(encoding)
             except UnicodeDecodeError as e:
-                feedback.reportError(self.tr(f"Napaka pri nastavitvi kodiranja ob branju .WOR datoteke: {e}"))
-                return None
-                
- 
+                feedback.reportError(self.tr(
+                    f"Napaka pri kodiranju {encoding}: {e}. Nekateri znaki bodo zamenjani."))
+                text = rawdata.decode(encoding, errors='replace')
+            return clean_wor_text(text), encoding
+
+
         # Retrieve the input parameters
         wor_file_path = self.parameterAsFile(parameters, self.INPUT, context)
         feedback.pushInfo(self.tr('Berem WOR datoteko: {}'.format(wor_file_path)))
 
+        chosen_codec = FALLBACK_ENCODINGS[
+            self.parameterAsEnum(parameters, self.ENCODING, context)][1]
+
         # Read the .wor file
-        input_wor_content = read_wor_file(wor_file_path)
+        input_wor_content, fallback_codec = read_wor_file(wor_file_path)
+        if input_wor_content is None:
+            return {}
 
         # Load .tab files into QGIS
   
